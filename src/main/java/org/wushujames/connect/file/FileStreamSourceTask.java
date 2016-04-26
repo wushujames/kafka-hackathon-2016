@@ -26,15 +26,18 @@ import org.slf4j.LoggerFactory;
 
 import com.amazonaws.auth.profile.ProfileCredentialsProvider;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBStreamsClient;
+import com.amazonaws.services.dynamodbv2.model.AttributeValue;
 import com.amazonaws.services.dynamodbv2.model.GetRecordsRequest;
 import com.amazonaws.services.dynamodbv2.model.GetRecordsResult;
 import com.amazonaws.services.dynamodbv2.model.GetShardIteratorRequest;
 import com.amazonaws.services.dynamodbv2.model.GetShardIteratorResult;
 import com.amazonaws.services.dynamodbv2.model.Record;
 import com.amazonaws.services.dynamodbv2.model.ShardIteratorType;
+import com.amazonaws.services.dynamodbv2.model.StreamRecord;
 
 import java.io.*;
 import java.util.*;
+import java.util.Map.Entry;
 
 /**
  * FileStreamSourceTask reads from stdin or a file.
@@ -98,6 +101,26 @@ public class FileStreamSourceTask extends SourceTask {
         System.out.println("Getting records...");
         for (Record record : records) {
             System.out.println(record);
+            StreamRecord streamRecord = record.getDynamodb();
+            
+            System.out.println("Record key:");
+            Map<String, AttributeValue> key = streamRecord.getKeys();
+            for (Entry<String, AttributeValue> entry : key.entrySet()) {
+                System.out.println(String.format("key: %s, value: %s",
+                        entry.getKey(),
+                        entry.getValue()));
+            }
+
+            System.out.println("Record value:");
+            Map<String, AttributeValue> data = streamRecord.getNewImage();
+            for (Entry<String, AttributeValue> entry : data.entrySet()) {
+                System.out.println(String.format("key: %s, value: %s",
+                        entry.getKey(),
+                        entry.getValue()));
+            }
+            
+            String sequenceNumber = streamRecord.getSequenceNumber();
+            System.out.println("shardSequenceNumber: " + sequenceNumber);
         }
         nextItr = getRecordsResult.getNextShardIterator();
 
