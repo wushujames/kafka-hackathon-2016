@@ -22,6 +22,15 @@ import org.apache.kafka.connect.connector.Task;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceConnector;
 
+import com.amazonaws.auth.profile.ProfileCredentialsProvider;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBStreamsClient;
+import com.amazonaws.services.dynamodbv2.model.DescribeStreamRequest;
+import com.amazonaws.services.dynamodbv2.model.DescribeStreamResult;
+import com.amazonaws.services.dynamodbv2.model.DescribeTableResult;
+import com.amazonaws.services.dynamodbv2.model.Shard;
+import com.amazonaws.services.dynamodbv2.model.StreamSpecification;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -34,9 +43,19 @@ import java.util.Map;
 public class FileStreamSourceConnector extends SourceConnector {
     public static final String TOPIC_CONFIG = "topic";
     public static final String FILE_CONFIG = "file";
-
+    
+    
     private String filename;
     private String topic;
+    private String tableName;
+    private String awsRegion;
+
+    private static AmazonDynamoDBClient dynamoDBClient = 
+            new AmazonDynamoDBClient(new ProfileCredentialsProvider());
+
+    private static AmazonDynamoDBStreamsClient streamsClient = 
+            new AmazonDynamoDBStreamsClient(new ProfileCredentialsProvider());
+
 
     @Override
     public String version() {
@@ -45,12 +64,8 @@ public class FileStreamSourceConnector extends SourceConnector {
 
     @Override
     public void start(Map<String, String> props) {
-        filename = props.get(FILE_CONFIG);
-        topic = props.get(TOPIC_CONFIG);
-        if (topic == null || topic.isEmpty())
-            throw new ConnectException("FileStreamSourceConnector configuration must include 'topic' setting");
-        if (topic.contains(","))
-            throw new ConnectException("FileStreamSourceConnector should only have a single topic when used as a source.");
+        tableName = "test01";
+        awsRegion = "us-west-2";
     }
 
     @Override
@@ -62,11 +77,46 @@ public class FileStreamSourceConnector extends SourceConnector {
     public List<Map<String, String>> taskConfigs(int maxTasks) {
         ArrayList<Map<String, String>> configs = new ArrayList<>();
         // Only one input stream makes sense.
-        Map<String, String> config = new HashMap<>();
-        if (filename != null)
-            config.put(FILE_CONFIG, filename);
-        config.put(TOPIC_CONFIG, topic);
-        configs.add(config);
+        
+        String dynamoDbEndpoint = "https://dynamodb.us-west-2.amazonaws.com";
+        String streamsEndpoint = "https://streams.dynamodb.us-west-2.amazonaws.com";
+        
+
+        dynamoDBClient.setEndpoint(dynamoDbEndpoint);  
+        streamsClient.setEndpoint(streamsEndpoint);
+        
+        // Determine the Streams settings for the table
+        DescribeTableResult describeTableResult = dynamoDBClient.describeTable(tableName);
+
+        String myStreamArn = describeTableResult.getTable().getLatestStreamArn();
+        
+        StreamSpecification myStreamSpec = 
+                describeTableResult.getTable().getStreamSpecification();
+        
+        System.out.println("Current stream ARN for " + tableName + ": "+ myStreamArn);
+        System.out.println("Stream enabled: "+ myStreamSpec.getStreamEnabled());
+        System.out.println("Update view type: "+ myStreamSpec.getStreamViewType());
+
+        // get the shards
+        DescribeStreamResult describeStreamResult = 
+                streamsClient.describeStream(new DescribeStreamRequest()
+                    .withStreamArn(myStreamArn));
+        
+        String streamArn = 
+                describeStreamResult.getStreamDescription().getStreamArn();
+        List<Shard> shards = 
+                describeStreamResult.getStreamDescription().getShards();
+
+        System.out.println("Number of shards: " + shards.size());
+        
+        for (Shard shard : shards) {
+            Map<String, String> config = new HashMap<>();
+
+            String shardId = shard.getShardId();
+            config.put("streamArn", streamArn);
+            config.put("shardId", shardId);
+            configs.add(config);
+        }
         return configs;
     }
 
