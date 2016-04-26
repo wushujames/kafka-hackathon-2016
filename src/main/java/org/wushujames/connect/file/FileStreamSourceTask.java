@@ -168,6 +168,8 @@ public class FileStreamSourceTask extends SourceTask {
         }
         nextItr = getRecordsResult.getNextShardIterator();
 
+        Thread.sleep(1000);
+
         return results;
 //
 //        
