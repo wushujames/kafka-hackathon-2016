@@ -64,8 +64,15 @@ public class FileStreamSourceConnector extends SourceConnector {
 
     @Override
     public void start(Map<String, String> props) {
-        tableName = "test01";
+        tableName = "test02";
         awsRegion = "us-west-2";
+
+        String dynamoDbEndpoint = "https://dynamodb.us-west-2.amazonaws.com";
+        String streamsEndpoint = "https://streams.dynamodb.us-west-2.amazonaws.com";
+
+        dynamoDBClient.setEndpoint(dynamoDbEndpoint);  
+        streamsClient.setEndpoint(streamsEndpoint);
+
     }
 
     @Override
@@ -78,12 +85,6 @@ public class FileStreamSourceConnector extends SourceConnector {
         ArrayList<Map<String, String>> configs = new ArrayList<>();
         // Only one input stream makes sense.
         
-        String dynamoDbEndpoint = "https://dynamodb.us-west-2.amazonaws.com";
-        String streamsEndpoint = "https://streams.dynamodb.us-west-2.amazonaws.com";
-        
-
-        dynamoDBClient.setEndpoint(dynamoDbEndpoint);  
-        streamsClient.setEndpoint(streamsEndpoint);
         
         // Determine the Streams settings for the table
         DescribeTableResult describeTableResult = dynamoDBClient.describeTable(tableName);
@@ -115,6 +116,7 @@ public class FileStreamSourceConnector extends SourceConnector {
             String shardId = shard.getShardId();
             config.put("streamArn", streamArn);
             config.put("shardId", shardId);
+            System.out.println("streamArn: " + streamArn + ", shardId: " + shardId);
             configs.add(config);
         }
         return configs;

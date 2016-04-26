@@ -56,7 +56,7 @@ public class FileStreamSourceConnectorTest {
 
         connector.start(sourceProperties);
         List<Map<String, String>> taskConfigs = connector.taskConfigs(1);
-        assertEquals(6, taskConfigs.size());
+        assertEquals(1, taskConfigs.size());
         
         PowerMock.verifyAll();
     }

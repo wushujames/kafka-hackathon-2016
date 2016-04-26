@@ -24,6 +24,15 @@ import org.apache.kafka.connect.source.SourceTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.amazonaws.auth.profile.ProfileCredentialsProvider;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBStreamsClient;
+import com.amazonaws.services.dynamodbv2.model.GetRecordsRequest;
+import com.amazonaws.services.dynamodbv2.model.GetRecordsResult;
+import com.amazonaws.services.dynamodbv2.model.GetShardIteratorRequest;
+import com.amazonaws.services.dynamodbv2.model.GetShardIteratorResult;
+import com.amazonaws.services.dynamodbv2.model.Record;
+import com.amazonaws.services.dynamodbv2.model.ShardIteratorType;
+
 import java.io.*;
 import java.util.*;
 
@@ -43,7 +52,15 @@ public class FileStreamSourceTask extends SourceTask {
     private int offset = 0;
     private String topic = null;
 
+    private String shardId;
+    private String streamArn;
+    private String nextItr = null;
+    
     private Long streamOffset;
+    
+    private static AmazonDynamoDBStreamsClient streamsClient = 
+            new AmazonDynamoDBStreamsClient(new ProfileCredentialsProvider());
+
 
     @Override
     public String version() {
@@ -52,108 +69,130 @@ public class FileStreamSourceTask extends SourceTask {
 
     @Override
     public void start(Map<String, String> props) {
-        filename = props.get(FileStreamSourceConnector.FILE_CONFIG);
-        if (filename == null || filename.isEmpty()) {
-            stream = System.in;
-            // Tracking offset for stdin doesn't make sense
-            streamOffset = null;
-            reader = new BufferedReader(new InputStreamReader(stream));
-        }
-        topic = props.get(FileStreamSourceConnector.TOPIC_CONFIG);
-        if (topic == null)
-            throw new ConnectException("FileStreamSourceTask config missing topic setting");
+        shardId = props.get("shardId");
+        streamArn = props.get("streamArn");
+        
+        String streamsEndpoint = "https://streams.dynamodb.us-west-2.amazonaws.com";
+        streamsClient.setEndpoint(streamsEndpoint);
     }
 
     @Override
     public List<SourceRecord> poll() throws InterruptedException {
-        if (stream == null) {
-            try {
-                stream = new FileInputStream(filename);
-                Map<String, Object> offset = context.offsetStorageReader().offset(Collections.singletonMap(FILENAME_FIELD, filename));
-                if (offset != null) {
-                    Object lastRecordedOffset = offset.get(POSITION_FIELD);
-                    if (lastRecordedOffset != null && !(lastRecordedOffset instanceof Long))
-                        throw new ConnectException("Offset position is the incorrect type");
-                    if (lastRecordedOffset != null) {
-                        log.debug("Found previous offset, trying to skip to file offset {}", lastRecordedOffset);
-                        long skipLeft = (Long) lastRecordedOffset;
-                        while (skipLeft > 0) {
-                            try {
-                                long skipped = stream.skip(skipLeft);
-                                skipLeft -= skipped;
-                            } catch (IOException e) {
-                                log.error("Error while trying to seek to previous offset in file: ", e);
-                                throw new ConnectException(e);
-                            }
-                        }
-                        log.debug("Skipped to offset {}", lastRecordedOffset);
-                    }
-                    streamOffset = (lastRecordedOffset != null) ? (Long) lastRecordedOffset : 0L;
-                } else {
-                    streamOffset = 0L;
-                }
-                reader = new BufferedReader(new InputStreamReader(stream));
-                log.debug("Opened {} for reading", logFilename());
-            } catch (FileNotFoundException e) {
-                log.warn("Couldn't find file for FileStreamSourceTask, sleeping to wait for it to be created");
-                synchronized (this) {
-                    this.wait(1000);
-                }
-                return null;
-            }
+        // Get an iterator for the current shard
+
+        if (nextItr == null) {
+            GetShardIteratorRequest getShardIteratorRequest = new GetShardIteratorRequest()
+            .withStreamArn(streamArn)
+            .withShardId(shardId)
+            .withShardIteratorType(ShardIteratorType.TRIM_HORIZON);
+            GetShardIteratorResult getShardIteratorResult = 
+                    streamsClient.getShardIterator(getShardIteratorRequest);
+            nextItr = getShardIteratorResult.getShardIterator();
         }
-
-        // Unfortunately we can't just use readLine() because it blocks in an uninterruptible way.
-        // Instead we have to manage splitting lines ourselves, using simple backoff when no new data
-        // is available.
-        try {
-            final BufferedReader readerCopy;
-            synchronized (this) {
-                readerCopy = reader;
-            }
-            if (readerCopy == null)
-                return null;
-
-            ArrayList<SourceRecord> records = null;
-
-            int nread = 0;
-            while (readerCopy.ready()) {
-                nread = readerCopy.read(buffer, offset, buffer.length - offset);
-                log.trace("Read {} bytes from {}", nread, logFilename());
-
-                if (nread > 0) {
-                    offset += nread;
-                    if (offset == buffer.length) {
-                        char[] newbuf = new char[buffer.length * 2];
-                        System.arraycopy(buffer, 0, newbuf, 0, buffer.length);
-                        buffer = newbuf;
-                    }
-
-                    String line;
-                    do {
-                        line = extractLine();
-                        if (line != null) {
-                            log.trace("Read a line from {}", logFilename());
-                            if (records == null)
-                                records = new ArrayList<>();
-                            records.add(new SourceRecord(offsetKey(filename), offsetValue(streamOffset), topic, VALUE_SCHEMA, line));
-                        }
-                        new ArrayList<SourceRecord>();
-                    } while (line != null);
-                }
-            }
-
-            if (nread <= 0)
-                synchronized (this) {
-                    this.wait(1000);
-                }
-
-            return records;
-        } catch (IOException e) {
-            // Underlying stream was killed, probably as a result of calling stop. Allow to return
-            // null, and driving thread will handle any shutdown if necessary.
+        
+        // Use the iterator to read the data records from the shard
+        GetRecordsResult getRecordsResult = 
+            streamsClient.getRecords(new GetRecordsRequest().
+                withShardIterator(nextItr));
+        List<Record> records = getRecordsResult.getRecords();
+        System.out.println("Getting records...");
+        for (Record record : records) {
+            System.out.println(record);
         }
+        nextItr = getRecordsResult.getNextShardIterator();
+
         return null;
+//
+//        
+//        
+//        if (stream == null) {
+//            try {
+//                stream = new FileInputStream(filename);
+//                Map<String, Object> offset = context.offsetStorageReader().offset(Collections.singletonMap(FILENAME_FIELD, filename));
+//                if (offset != null) {
+//                    Object lastRecordedOffset = offset.get(POSITION_FIELD);
+//                    if (lastRecordedOffset != null && !(lastRecordedOffset instanceof Long))
+//                        throw new ConnectException("Offset position is the incorrect type");
+//                    if (lastRecordedOffset != null) {
+//                        log.debug("Found previous offset, trying to skip to file offset {}", lastRecordedOffset);
+//                        long skipLeft = (Long) lastRecordedOffset;
+//                        while (skipLeft > 0) {
+//                            try {
+//                                long skipped = stream.skip(skipLeft);
+//                                skipLeft -= skipped;
+//                            } catch (IOException e) {
+//                                log.error("Error while trying to seek to previous offset in file: ", e);
+//                                throw new ConnectException(e);
+//                            }
+//                        }
+//                        log.debug("Skipped to offset {}", lastRecordedOffset);
+//                    }
+//                    streamOffset = (lastRecordedOffset != null) ? (Long) lastRecordedOffset : 0L;
+//                } else {
+//                    streamOffset = 0L;
+//                }
+//                reader = new BufferedReader(new InputStreamReader(stream));
+//                log.debug("Opened {} for reading", logFilename());
+//            } catch (FileNotFoundException e) {
+//                log.warn("Couldn't find file for FileStreamSourceTask, sleeping to wait for it to be created");
+//                synchronized (this) {
+//                    this.wait(1000);
+//                }
+//                return null;
+//            }
+//        }
+//
+//        // Unfortunately we can't just use readLine() because it blocks in an uninterruptible way.
+//        // Instead we have to manage splitting lines ourselves, using simple backoff when no new data
+//        // is available.
+//        try {
+//            final BufferedReader readerCopy;
+//            synchronized (this) {
+//                readerCopy = reader;
+//            }
+//            if (readerCopy == null)
+//                return null;
+//
+//            ArrayList<SourceRecord> records = null;
+//
+//            int nread = 0;
+//            while (readerCopy.ready()) {
+//                nread = readerCopy.read(buffer, offset, buffer.length - offset);
+//                log.trace("Read {} bytes from {}", nread, logFilename());
+//
+//                if (nread > 0) {
+//                    offset += nread;
+//                    if (offset == buffer.length) {
+//                        char[] newbuf = new char[buffer.length * 2];
+//                        System.arraycopy(buffer, 0, newbuf, 0, buffer.length);
+//                        buffer = newbuf;
+//                    }
+//
+//                    String line;
+//                    do {
+//                        line = extractLine();
+//                        if (line != null) {
+//                            log.trace("Read a line from {}", logFilename());
+//                            if (records == null)
+//                                records = new ArrayList<>();
+//                            records.add(new SourceRecord(offsetKey(filename), offsetValue(streamOffset), topic, VALUE_SCHEMA, line));
+//                        }
+//                        new ArrayList<SourceRecord>();
+//                    } while (line != null);
+//                }
+//            }
+//
+//            if (nread <= 0)
+//                synchronized (this) {
+//                    this.wait(1000);
+//                }
+//
+//            return records;
+//        } catch (IOException e) {
+//            // Underlying stream was killed, probably as a result of calling stop. Allow to return
+//            // null, and driving thread will handle any shutdown if necessary.
+//        }
+//        return null;
     }
 
     private String extractLine() {
