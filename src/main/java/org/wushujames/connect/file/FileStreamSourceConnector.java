@@ -116,6 +116,8 @@ public class FileStreamSourceConnector extends SourceConnector {
             String shardId = shard.getShardId();
             config.put("streamArn", streamArn);
             config.put("shardId", shardId);
+            config.put("tableName", tableName);
+            config.put("region", awsRegion);
             System.out.println("streamArn: " + streamArn + ", shardId: " + shardId);
             configs.add(config);
         }

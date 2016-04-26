@@ -18,6 +18,8 @@
 package org.wushujames.connect.file;
 
 import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.SchemaBuilder;
+import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
@@ -60,6 +62,8 @@ public class FileStreamSourceTask extends SourceTask {
     private String nextItr = null;
     
     private Long streamOffset;
+    private String tableName;
+    private String region;
     
     private static AmazonDynamoDBStreamsClient streamsClient = 
             new AmazonDynamoDBStreamsClient(new ProfileCredentialsProvider());
@@ -74,6 +78,8 @@ public class FileStreamSourceTask extends SourceTask {
     public void start(Map<String, String> props) {
         shardId = props.get("shardId");
         streamArn = props.get("streamArn");
+        tableName = props.get("tableName");
+        region = props.get("region");
         
         String streamsEndpoint = "https://streams.dynamodb.us-west-2.amazonaws.com";
         streamsClient.setEndpoint(streamsEndpoint);
@@ -81,6 +87,19 @@ public class FileStreamSourceTask extends SourceTask {
 
     @Override
     public List<SourceRecord> poll() throws InterruptedException {
+        //  
+        SchemaBuilder builder = SchemaBuilder.struct().name(region + "." + tableName);
+        // hardcode the datatype for the table primary key
+        // IRL, I'd have to do a "describe" of sorts on the table, to see what
+        // type the primary key is.
+        builder.field("name", Schema.STRING_SCHEMA);
+        Schema connectKeySchema = builder.build();
+        Struct connectKey = new Struct(connectKeySchema);
+        
+        Map<String, String> sourcePartition = new HashMap<String, String>();
+        sourcePartition.put("tableName", tableName);
+        sourcePartition.put("shardId", shardId);
+        
         // Get an iterator for the current shard
 
         if (nextItr == null) {
@@ -99,32 +118,57 @@ public class FileStreamSourceTask extends SourceTask {
                 withShardIterator(nextItr));
         List<Record> records = getRecordsResult.getRecords();
         System.out.println("Getting records...");
+
+        List<SourceRecord> results = new ArrayList<SourceRecord>();
         for (Record record : records) {
             System.out.println(record);
             StreamRecord streamRecord = record.getDynamodb();
-            
+
             System.out.println("Record key:");
-            Map<String, AttributeValue> key = streamRecord.getKeys();
-            for (Entry<String, AttributeValue> entry : key.entrySet()) {
+            Map<String, AttributeValue> dynamoKey = streamRecord.getKeys();
+            
+            for (Entry<String, AttributeValue> entry : dynamoKey.entrySet()) {
                 System.out.println(String.format("key: %s, value: %s",
                         entry.getKey(),
                         entry.getValue()));
+                AttributeValue s = entry.getValue();
+                if (s.getS() != null) {
+                    String sVal = s.getS();
+                    connectKey.put(entry.getKey(), sVal);
+                }
             }
 
             System.out.println("Record value:");
             Map<String, AttributeValue> data = streamRecord.getNewImage();
+            Map<String, String> connectRecord = new HashMap<String, String>();
+
             for (Entry<String, AttributeValue> entry : data.entrySet()) {
                 System.out.println(String.format("key: %s, value: %s",
                         entry.getKey(),
                         entry.getValue()));
+                connectRecord.put(entry.getKey(), entry.getValue().getS());
             }
             
             String sequenceNumber = streamRecord.getSequenceNumber();
             System.out.println("shardSequenceNumber: " + sequenceNumber);
+            
+            Map<String, String> connectOffset = new HashMap<String, String>();
+            connectOffset.put("sequenceNumber", sequenceNumber);
+            
+            SourceRecord rec = new SourceRecord(
+                    sourcePartition, 
+                    connectOffset,
+                    tableName, 
+                    null, //partition 
+                    connectKeySchema,
+                    connectKey,
+                    null,
+                    connectRecord);
+            results.add(rec);
         }
         nextItr = getRecordsResult.getNextShardIterator();
 
-        return null;
+        return results;
 //
 //        
 //        
