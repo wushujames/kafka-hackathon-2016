@@ -94,7 +94,9 @@ public class FileStreamSourceTaskTest {
         assertEquals(1, taskConfigs.size());
 
         task.start(taskConfigs.get(0));
-        assertEquals(null, task.poll());
+//        assertEquals(null, task.poll());
+        List<SourceRecord> s = task.poll();
+        s = task.poll();
         
         PowerMock.verifyAll();
 
