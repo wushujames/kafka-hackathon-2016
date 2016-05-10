@@ -117,10 +117,10 @@ public class FileStreamSourceConnector extends SourceConnector {
             Map<String, String> config = new HashMap<>();
 
             String shardId = shard.getShardId();
-            config.put("streamArn", streamArn);
-            config.put("shardId", shardId);
-            config.put("tableName", tableName);
-            config.put("region", awsRegionStr);
+            config.put(FileStreamSourceTask.STREAM_ARN_CONFIG, streamArn);
+            config.put(FileStreamSourceTask.SHARD_ID_CONFIG, shardId);
+            config.put(FileStreamSourceTask.TABLE_CONFIG, tableName);
+            config.put(FileStreamSourceTask.REGION_CONFIG, awsRegionStr);
             System.out.println("streamArn: " + streamArn + ", shardId: " + shardId);
             configs.add(config);
         }

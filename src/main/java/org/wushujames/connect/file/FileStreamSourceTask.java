@@ -57,6 +57,11 @@ public class FileStreamSourceTask extends SourceTask {
     public  static final String POSITION_FIELD = "position";
     private static final Schema VALUE_SCHEMA = Schema.STRING_SCHEMA;
 
+    public static final String REGION_CONFIG = "region";
+    public static final String TABLE_CONFIG = "tableName";
+    public static final String STREAM_ARN_CONFIG = "streamArn";
+    public static final String SHARD_ID_CONFIG = "shardId";
+
     private String filename;
     private InputStream stream;
     private BufferedReader reader = null;
@@ -85,10 +90,10 @@ public class FileStreamSourceTask extends SourceTask {
 
     @Override
     public void start(Map<String, String> props) {
-        shardId = props.get("shardId");
-        streamArn = props.get("streamArn");
-        tableName = props.get("tableName");
-        region = props.get("region");
+        shardId = props.get(SHARD_ID_CONFIG);
+        streamArn = props.get(STREAM_ARN_CONFIG);
+        tableName = props.get(TABLE_CONFIG);
+        region = props.get(REGION_CONFIG);
         
         Regions awsRegion = Regions.fromName(region);
         streamsClient = 
