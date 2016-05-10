@@ -88,6 +88,8 @@ public class FileStreamSourceTaskTest {
         PowerMock.replayAll();
 
         HashMap<String, String> sourceProperties = new HashMap<>();
+        sourceProperties.put(FileStreamSourceConnector.TABLE_CONFIG, "testNumber");
+        sourceProperties.put(FileStreamSourceConnector.AWS_REGION_CONFIG, "us-west-2");
 
         connector.start(sourceProperties);
         List<Map<String, String>> taskConfigs = connector.taskConfigs(1);

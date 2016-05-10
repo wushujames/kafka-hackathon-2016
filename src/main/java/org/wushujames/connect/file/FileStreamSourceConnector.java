@@ -43,6 +43,10 @@ import java.util.Map;
  * sink modes via its 'mode' setting.
  */
 public class FileStreamSourceConnector extends SourceConnector {
+    public static final String TABLE_CONFIG = "table";
+    public static final String AWS_REGION_CONFIG = "region";
+    
+    
     public static final String TOPIC_CONFIG = "topic";
     public static final String FILE_CONFIG = "file";
     
@@ -62,8 +66,8 @@ public class FileStreamSourceConnector extends SourceConnector {
 
     @Override
     public void start(Map<String, String> props) {
-        tableName = "testNumber";
-        awsRegionStr = "us-west-2";
+        tableName = props.get(TABLE_CONFIG);
+        awsRegionStr = props.get(AWS_REGION_CONFIG);
 
         Regions awsRegion = Regions.fromName(awsRegionStr);
         dynamoDBClient = new AmazonDynamoDBClient(new ProfileCredentialsProvider()).withRegion(awsRegion);
