@@ -46,8 +46,6 @@ public class FileStreamSourceConnectorTest {
         connector.initialize(ctx);
 
         sourceProperties = new HashMap<>();
-        sourceProperties.put(FileStreamSourceConnector.TOPIC_CONFIG, SINGLE_TOPIC);
-        sourceProperties.put(FileStreamSourceConnector.FILE_CONFIG, FILENAME);
         sourceProperties.put(FileStreamSourceConnector.TABLE_CONFIG, "testNumber");
         sourceProperties.put(FileStreamSourceConnector.AWS_REGION_CONFIG, "us-west-2");
     }

@@ -46,13 +46,6 @@ public class FileStreamSourceConnector extends SourceConnector {
     public static final String TABLE_CONFIG = "table";
     public static final String AWS_REGION_CONFIG = "region";
     
-    
-    public static final String TOPIC_CONFIG = "topic";
-    public static final String FILE_CONFIG = "file";
-    
-    
-    private String filename;
-    private String topic;
     private String tableName;
     private String awsRegionStr;
 
