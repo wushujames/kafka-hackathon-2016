@@ -22,6 +22,8 @@ import org.apache.kafka.connect.connector.Task;
 import org.apache.kafka.connect.source.SourceConnector;
 
 import com.amazonaws.auth.profile.ProfileCredentialsProvider;
+import com.amazonaws.regions.Region;
+import com.amazonaws.regions.Regions;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBStreamsClient;
 import com.amazonaws.services.dynamodbv2.model.DescribeStreamRequest;
@@ -48,14 +50,10 @@ public class FileStreamSourceConnector extends SourceConnector {
     private String filename;
     private String topic;
     private String tableName;
-    private String awsRegion;
+    private String awsRegionStr;
 
-    private static AmazonDynamoDBClient dynamoDBClient = 
-            new AmazonDynamoDBClient(new ProfileCredentialsProvider());
-
-    private static AmazonDynamoDBStreamsClient streamsClient = 
-            new AmazonDynamoDBStreamsClient(new ProfileCredentialsProvider());
-
+    private AmazonDynamoDBClient dynamoDBClient; 
+    private AmazonDynamoDBStreamsClient streamsClient;
 
     @Override
     public String version() {
@@ -65,14 +63,12 @@ public class FileStreamSourceConnector extends SourceConnector {
     @Override
     public void start(Map<String, String> props) {
         tableName = "testNumber";
-        awsRegion = "us-west-2";
+        awsRegionStr = "us-west-2";
 
-        String dynamoDbEndpoint = "https://dynamodb.us-west-2.amazonaws.com";
-        String streamsEndpoint = "https://streams.dynamodb.us-west-2.amazonaws.com";
-
-        dynamoDBClient.setEndpoint(dynamoDbEndpoint);  
-        streamsClient.setEndpoint(streamsEndpoint);
-
+        Regions awsRegion = Regions.fromName(awsRegionStr);
+        dynamoDBClient = new AmazonDynamoDBClient(new ProfileCredentialsProvider()).withRegion(awsRegion);
+        streamsClient =  
+                new AmazonDynamoDBStreamsClient(new ProfileCredentialsProvider()).withRegion(awsRegion);
     }
 
     @Override
@@ -120,7 +116,7 @@ public class FileStreamSourceConnector extends SourceConnector {
             config.put("streamArn", streamArn);
             config.put("shardId", shardId);
             config.put("tableName", tableName);
-            config.put("region", awsRegion);
+            config.put("region", awsRegionStr);
             System.out.println("streamArn: " + streamArn + ", shardId: " + shardId);
             configs.add(config);
         }
