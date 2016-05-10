@@ -58,7 +58,7 @@ public class FileStreamSourceTask extends SourceTask {
     private static final Schema VALUE_SCHEMA = Schema.STRING_SCHEMA;
 
     public static final String REGION_CONFIG = "region";
-    public static final String TABLE_CONFIG = "tableName";
+    public static final String TABLE_CONFIG = "table";
     public static final String STREAM_ARN_CONFIG = "streamArn";
     public static final String SHARD_ID_CONFIG = "shardId";
 
