@@ -20,24 +20,30 @@ package org.wushujames.connect.file;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
-import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.amazonaws.auth.profile.ProfileCredentialsProvider;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBStreamsClient;
+import com.amazonaws.services.dynamodbv2.model.AttributeDefinition;
 import com.amazonaws.services.dynamodbv2.model.AttributeValue;
+import com.amazonaws.services.dynamodbv2.model.DescribeTableResult;
 import com.amazonaws.services.dynamodbv2.model.GetRecordsRequest;
 import com.amazonaws.services.dynamodbv2.model.GetRecordsResult;
 import com.amazonaws.services.dynamodbv2.model.GetShardIteratorRequest;
 import com.amazonaws.services.dynamodbv2.model.GetShardIteratorResult;
+import com.amazonaws.services.dynamodbv2.model.KeySchemaElement;
 import com.amazonaws.services.dynamodbv2.model.Record;
+import com.amazonaws.services.dynamodbv2.model.ScalarAttributeType;
 import com.amazonaws.services.dynamodbv2.model.ShardIteratorType;
 import com.amazonaws.services.dynamodbv2.model.StreamRecord;
+import com.amazonaws.services.dynamodbv2.model.TableDescription;
 
 import java.io.*;
+import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.Map.Entry;
 
@@ -64,6 +70,9 @@ public class FileStreamSourceTask extends SourceTask {
     private Long streamOffset;
     private String tableName;
     private String region;
+    private Schema connectKeySchema;
+    private Set<String> dynamoKeyNames = new HashSet<String>();
+
     
     private static AmazonDynamoDBStreamsClient streamsClient = 
             new AmazonDynamoDBStreamsClient(new ProfileCredentialsProvider());
@@ -83,17 +92,63 @@ public class FileStreamSourceTask extends SourceTask {
         
         String streamsEndpoint = "https://streams.dynamodb.us-west-2.amazonaws.com";
         streamsClient.setEndpoint(streamsEndpoint);
+        
+        // to get the table key schema
+        AmazonDynamoDBClient dynamoDBClient = 
+                new AmazonDynamoDBClient(new ProfileCredentialsProvider());
+        String dynamoDbEndpoint = "https://dynamodb.us-west-2.amazonaws.com";
+        dynamoDBClient.setEndpoint(dynamoDbEndpoint);  
+
+        DescribeTableResult describeTableResult = dynamoDBClient.describeTable(tableName);
+
+        // get the schema for the table key
+        TableDescription tableDesc = describeTableResult.getTable();
+        
+        // map from field name to field type
+        List<AttributeDefinition> defns = tableDesc.getAttributeDefinitions();
+        Map<String, ScalarAttributeType> fieldToType = new HashMap<String, ScalarAttributeType>();
+        for (AttributeDefinition defn : defns) {
+            fieldToType.put(defn.getAttributeName(),
+                    ScalarAttributeType.fromValue(defn.getAttributeType()));
+        }
+        
+        // build the connect schema
+        SchemaBuilder builder = SchemaBuilder.struct().name(tableName + "." + region);
+        
+        List<KeySchemaElement> keySchemas = tableDesc.getKeySchema();
+        for (KeySchemaElement keySchema : keySchemas) {
+            // get field type
+            String fieldName = keySchema.getAttributeName();
+            dynamoKeyNames.add(fieldName);
+            
+            ScalarAttributeType fieldType = fieldToType.get(fieldName);
+            switch (fieldType) {
+            case B:
+                builder.field(fieldName, Schema.BYTES_SCHEMA);
+                break;
+            case N:
+                // Per http://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.NamingRulesDataTypes.html
+                // "If number precision is important, you should pass numbers to DynamoDB using strings that you convert from number type."
+                builder.field(fieldName, Schema.STRING_SCHEMA);
+                break;
+            case S:
+                builder.field(fieldName, Schema.STRING_SCHEMA);
+                break;
+            default:
+                throw new RuntimeException(String.format("table has unknown field type. region = %s, table = %s, field = %s, type = %s",
+                        region, tableName, fieldName, fieldType.toString()
+                        ));
+
+            }
+            
+        }
+        connectKeySchema = builder.build();
+
     }
 
     @Override
     public List<SourceRecord> poll() throws InterruptedException {
         //  
-        SchemaBuilder builder = SchemaBuilder.struct().name(region + "." + tableName);
-        // hardcode the datatype for the table primary key
-        // IRL, I'd have to do a "describe" of sorts on the table, to see what
-        // type the primary key is.
-        builder.field("name", Schema.STRING_SCHEMA);
-        Schema connectKeySchema = builder.build();
         Struct connectKey = new Struct(connectKeySchema);
         
         Map<String, String> sourcePartition = new HashMap<String, String>();
@@ -127,26 +182,56 @@ public class FileStreamSourceTask extends SourceTask {
             System.out.println("Record key:");
             Map<String, AttributeValue> dynamoKey = streamRecord.getKeys();
             
+            // fill out the primary key
             for (Entry<String, AttributeValue> entry : dynamoKey.entrySet()) {
+                String fieldName = entry.getKey();
+                AttributeValue fieldValue = entry.getValue();
                 System.out.println(String.format("key: %s, value: %s",
-                        entry.getKey(),
-                        entry.getValue()));
-                AttributeValue s = entry.getValue();
-                if (s.getS() != null) {
-                    String sVal = s.getS();
-                    connectKey.put(entry.getKey(), sVal);
+                        fieldName,
+                        fieldValue));
+                
+                if (dynamoKeyNames.contains(fieldName)) { 
+                    if (fieldValue.getS() != null) {
+                        String sVal = fieldValue.getS();
+                        connectKey.put(fieldName, sVal);
+                    } else if (fieldValue.getB() != null) {
+                        ByteBuffer bVal = fieldValue.getB();
+                        byte[] arr = bVal.array();
+                        connectKey.put(fieldName, Arrays.copyOf(arr, arr.length));
+                    } else if (fieldValue.getN() != null) {
+                        String nVal = fieldValue.getN();
+                        connectKey.put(fieldName, nVal);
+                    } else {
+                        throw new RuntimeException(String.format("key field type is unsupported, region = %s, table = %s, field = %s, value = %s",
+                                region, tableName, fieldName, entry));
+                    }
                 }
             }
 
             System.out.println("Record value:");
             Map<String, AttributeValue> data = streamRecord.getNewImage();
-            Map<String, String> connectRecord = new HashMap<String, String>();
+            Map<String, Object> connectRecord = new HashMap<String, Object>();
 
             for (Entry<String, AttributeValue> entry : data.entrySet()) {
+                String fieldName = entry.getKey();
+                AttributeValue fieldValue = entry.getValue();
                 System.out.println(String.format("key: %s, value: %s",
-                        entry.getKey(),
-                        entry.getValue()));
-                connectRecord.put(entry.getKey(), entry.getValue().getS());
+                        fieldName,
+                        fieldValue));
+                if (fieldValue.getS() != null) {
+                    connectRecord.put(fieldName, fieldValue.getS());
+                } else if (fieldValue.getB() != null) {
+                    ByteBuffer bVal = fieldValue.getB();
+                    byte[] arr = bVal.array();
+                    connectRecord.put(fieldName, Arrays.copyOf(arr, arr.length));
+                } else if (fieldValue.getN() != null) {
+                    String nVal = fieldValue.getN();
+                    connectRecord.put(fieldName, nVal);
+                } else {
+                    throw new RuntimeException(String.format("record field type is unsupported, region = %s, table = %s, field = %s, value = %s",
+                            region, tableName, fieldName, entry));
+
+                }
             }
             
             String sequenceNumber = streamRecord.getSequenceNumber();

@@ -19,7 +19,6 @@ package org.wushujames.connect.file;
 
 import org.apache.kafka.common.utils.AppInfoParser;
 import org.apache.kafka.connect.connector.Task;
-import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceConnector;
 
 import com.amazonaws.auth.profile.ProfileCredentialsProvider;
@@ -30,6 +29,7 @@ import com.amazonaws.services.dynamodbv2.model.DescribeStreamResult;
 import com.amazonaws.services.dynamodbv2.model.DescribeTableResult;
 import com.amazonaws.services.dynamodbv2.model.Shard;
 import com.amazonaws.services.dynamodbv2.model.StreamSpecification;
+import com.amazonaws.services.dynamodbv2.model.TableDescription;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -64,7 +64,7 @@ public class FileStreamSourceConnector extends SourceConnector {
 
     @Override
     public void start(Map<String, String> props) {
-        tableName = "test02";
+        tableName = "testNumber";
         awsRegion = "us-west-2";
 
         String dynamoDbEndpoint = "https://dynamodb.us-west-2.amazonaws.com";
@@ -89,10 +89,13 @@ public class FileStreamSourceConnector extends SourceConnector {
         // Determine the Streams settings for the table
         DescribeTableResult describeTableResult = dynamoDBClient.describeTable(tableName);
 
-        String myStreamArn = describeTableResult.getTable().getLatestStreamArn();
+        // get the schema for the table key
+        TableDescription tableDesc = describeTableResult.getTable();
+
+        String myStreamArn = tableDesc.getLatestStreamArn();
         
         StreamSpecification myStreamSpec = 
-                describeTableResult.getTable().getStreamSpecification();
+                tableDesc.getStreamSpecification();
         
         System.out.println("Current stream ARN for " + tableName + ": "+ myStreamArn);
         System.out.println("Stream enabled: "+ myStreamSpec.getStreamEnabled());
