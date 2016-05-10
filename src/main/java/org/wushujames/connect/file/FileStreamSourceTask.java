@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.amazonaws.auth.profile.ProfileCredentialsProvider;
+import com.amazonaws.regions.Regions;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBStreamsClient;
 import com.amazonaws.services.dynamodbv2.model.AttributeDefinition;
@@ -74,8 +75,7 @@ public class FileStreamSourceTask extends SourceTask {
     private Set<String> dynamoKeyNames = new HashSet<String>();
 
     
-    private static AmazonDynamoDBStreamsClient streamsClient = 
-            new AmazonDynamoDBStreamsClient(new ProfileCredentialsProvider());
+    private AmazonDynamoDBStreamsClient streamsClient;
 
 
     @Override
@@ -90,14 +90,13 @@ public class FileStreamSourceTask extends SourceTask {
         tableName = props.get("tableName");
         region = props.get("region");
         
-        String streamsEndpoint = "https://streams.dynamodb.us-west-2.amazonaws.com";
-        streamsClient.setEndpoint(streamsEndpoint);
+        Regions awsRegion = Regions.fromName(region);
+        streamsClient = 
+                new AmazonDynamoDBStreamsClient(new ProfileCredentialsProvider()).withRegion(awsRegion);
         
         // to get the table key schema
         AmazonDynamoDBClient dynamoDBClient = 
-                new AmazonDynamoDBClient(new ProfileCredentialsProvider());
-        String dynamoDbEndpoint = "https://dynamodb.us-west-2.amazonaws.com";
-        dynamoDBClient.setEndpoint(dynamoDbEndpoint);  
+                new AmazonDynamoDBClient(new ProfileCredentialsProvider()).withRegion(awsRegion);
 
         DescribeTableResult describeTableResult = dynamoDBClient.describeTable(tableName);
 
